@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package messagepackage;
+
+option go_package = "/proto;messagepackage";
+
+message WordCount {
+  string word = 1;
+  int32 frequency = 2;
+}
+
+message WordMap {
+  repeated WordCount words = 1;
+}
+
+message Links {
+  repeated string links = 1;
+}

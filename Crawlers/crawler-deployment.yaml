@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crawler-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crawler-1
+  template:
+    metadata:
+      labels:
+        app: crawler-1
+    spec:
+      containers:
+      - name: crawler
+        image: efrink29/crawler:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB1_CONN
+          valueFrom:
+            secretKeyRef:
+              name: db1-credentials
+              key: connection-string
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crawler-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crawler-2
+  template:
+    metadata:
+      labels:
+        app: crawler-2
+    spec:
+      containers:
+      - name: crawler
+        image: efrink29/crawler:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB1_CONN
+          valueFrom:
+            secretKeyRef:
+              name: db1-credentials
+              key: connection-string
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crawler-3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crawler-3
+  template:
+    metadata:
+      labels:
+        app: crawler-3
+    spec:
+      containers:
+      - name: crawler
+        image: efrink29/crawler:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB1_CONN
+          valueFrom:
+            secretKeyRef:
+              name: db1-credentials
+              key: connection-string
