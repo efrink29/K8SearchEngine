@@ -3,227 +3,189 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"golang.org/x/net/html"
 )
 
-type ReverseIndex map[string][]UrlFrequency // map of word to list of URLs and their frequency
-
-type WordFrequency struct {
-	word      string
-	frequency int
-}
-
-type UrlFrequency struct {
-	url       string
-	frequency int
-}
+type ReverseIndex map[string]int
 
 func main() {
-	//links := &messagepackage.Links{Links: []string{}} // Initialize Links struct
+	// Read environment variables
+	connStrDB := os.Getenv("DB_CONN_STRING")
+	managerService := os.Getenv("MANAGER_SERVICE_HOST")
+	if managerService == "" {
+		log.Fatal("MANAGER_SERVICE_HOST environment variable not set")
+	}
 
-	startURL := os.Args[1]
-	connStr := os.Args[2] // PostgreSQL connection string
-	visited := make(map[string]bool)
-	reverseIndex := make(ReverseIndex)
-
-	// Initialize database connection
-	conn, err := pgx.Connect(context.Background(), connStr)
+	// Initialize database connection pool
+	pool, err := pgxpool.Connect(context.Background(), connStrDB)
 	if err != nil {
-		fmt.Printf("Error connecting to database: %v\n", err)
-		return
+		log.Fatalf("Error connecting to database: %v", err)
 	}
-	defer conn.Close(context.Background())
+	defer pool.Close()
 
-	crawl(startURL, visited, reverseIndex, 0)
-
-	// Save index to file
-	file, err := os.Create("index.txt")
-	if err != nil {
-		fmt.Printf("Error creating index file: %v\n", err)
-		return
-	}
-	defer file.Close()
-
-	// Sort each list of URLs for each word by frequency
-	for word, urls := range reverseIndex {
-		// Sort URLs by frequency in descending order
-		for i := 0; i < len(urls); i++ {
-			for j := i + 1; j < len(urls); j++ {
-				if urls[i].frequency < urls[j].frequency {
-					urls[i], urls[j] = urls[j], urls[i]
-				}
-			}
-		}
-		reverseIndex[word] = urls
-
-	}
-
-	for word, urls := range reverseIndex {
-
-		for _, urlFreq := range urls {
-			file.WriteString(fmt.Sprintf("%s: %s - %d\n", word, urlFreq.url, urlFreq.frequency))
-		}
-	}
-
-	// Ensure the table exists
-	err = initializeWordDB(conn)
-	if err != nil {
-		fmt.Printf("Error initializing word database: %v\n", err)
-		return
-	}
-
-	// Ensure the URL table exists
-	err = initializeURLDB(conn)
-	if err != nil {
-		fmt.Printf("Error initializing URL database: %v\n", err)
-		return
-	}
-
-	for url := range visited {
-		err = saveURLToDB(conn, url)
-		if err != nil {
-			fmt.Printf("Error saving URL %s to database: %v\n", url, err)
+	// Start HTTP server
+	http.HandleFunc("/crawl", func(w http.ResponseWriter, r *http.Request) {
+		url := r.URL.Query().Get("url")
+		if url == "" {
+			http.Error(w, "Missing URL parameter", http.StatusBadRequest)
 			return
 		}
+
+		go crawl(url, pool, managerService)
+		w.Write([]byte("Crawling started"))
+	})
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
-
-	// Save index to the database
-	//err = saveIndexToDB(conn, reverseIndex)
-	if err != nil {
-		fmt.Printf("Error saving index to database: %v\n", err)
-		return
-	}
-
-	fmt.Println("Index successfully saved to the database.")
+	log.Printf("Starting server on port %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
-func initializeURLDB(conn *pgx.Conn) error {
-	createTableQuery := `
-		CREATE TABLE IF NOT EXISTS url_index (
-			url TEXT PRIMARY KEY
-		);
-	`
-	_, err := conn.Exec(context.Background(), createTableQuery)
-	return err
-}
+func crawl(pageURL string, database *pgxpool.Pool, managerService string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-func saveURLToDB(conn *pgx.Conn, url string) error {
-	_, err := conn.Exec(context.Background(), `
-		INSERT INTO url_index (url)
-		VALUES ($1)
-		ON CONFLICT (url) DO NOTHING;
-	`, url)
-	return err
-}
-
-func initializeWordDB(conn *pgx.Conn) error {
-	createTableQuery := `
-		CREATE TABLE IF NOT EXISTS word_index (
-			word TEXT NOT NULL,
-			url TEXT NOT NULL,
-			frequency INT NOT NULL,
-			PRIMARY KEY (word, url)
-		);
-	`
-	_, err := conn.Exec(context.Background(), createTableQuery)
-	return err
-}
-
-func saveIndexToDB(conn *pgx.Conn, index ReverseIndex) error {
-	for word, urls := range index {
-		for _, urlFreq := range urls {
-			_, err := conn.Exec(context.Background(), `
-				INSERT INTO word_index (word, url, frequency)
-				VALUES ($1, $2, $3)
-				ON CONFLICT (word, url) DO UPDATE
-				SET frequency = word_index.frequency + EXCLUDED.frequency;
-			`, word, urlFreq.url, urlFreq.frequency)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func crawl(url string, visited map[string]bool, index ReverseIndex, depth int) {
-	if visited[url] {
-		return
-	}
-	visited[url] = true
-
-	resp, err := http.Get(url)
+	resp, err := http.Get(pageURL)
 	if err != nil || resp.StatusCode != 200 {
-		fmt.Printf("Error crawling %s: %v\n", url, err)
+		log.Printf("Error crawling %s: %v", pageURL, err)
 		return
 	}
 	defer resp.Body.Close()
 
 	doc, err := html.Parse(resp.Body)
-	// Remove Headers, Footers, and other non-content nodes
-
 	if err != nil {
-		fmt.Printf("Error parsing HTML for %s: %v\n", url, err)
+		log.Printf("Error parsing HTML for %s: %v", pageURL, err)
 		return
 	}
 
-	fmt.Printf("Crawling %s \n", url)
+	log.Printf("Crawling %s", pageURL)
+
+	// Extract metadata
+	title, description := extractMetadata(doc)
+
+	// Save metadata to database
+	err = saveMetaDataToDB(ctx, database, pageURL, title, description)
+	if err != nil {
+		log.Printf("Error saving metadata for %s: %v", pageURL, err)
+		return
+	}
 
 	// Extract text and tokenize
 	text := extractText(doc)
-	// Open file
-	file, err := os.Create("output.txt")
+	tokens := tokenize(text)
+	index := make(ReverseIndex)
+
+	for _, token := range tokens {
+		index[token]++
+	}
+
+	// Save reverse index to database
+	err = saveIndexToDB(ctx, database, index, pageURL)
 	if err != nil {
-		fmt.Printf("Error creating file: %v\n", err)
+		log.Printf("Error saving index for %s: %v", pageURL, err)
 		return
 	}
-	_, err = file.WriteString(text)
+
+	// Extract and normalize links
+	links := extractLinks(doc, pageURL)
+	for _, link := range links {
+		sendLinkToManager(managerService, link)
+	}
+}
+
+func sendLinkToManager(managerService, link string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://%s/crawl?url=%s", managerService, url.QueryEscape(link)), nil)
 	if err != nil {
-		fmt.Printf("Error writing to file: %v\n", err)
+		log.Printf("Error creating request for link %s: %v", link, err)
+		return
 	}
-	file.Close()
 
-	tokens := tokenize(text)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("Error forwarding link %s to manager: %v", link, err)
+		return
+	}
+	defer resp.Body.Close()
 
-	// Update reverse index
-	for _, token := range tokens {
-		if _, ok := index[token]; !ok {
-			newUrl := UrlFrequency{url, 1}
-			index[token] = []UrlFrequency{newUrl}
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Manager service returned status %d for link %s", resp.StatusCode, link)
+	}
+}
+
+func saveMetaDataToDB(ctx context.Context, conn *pgxpool.Pool, url, title, description string) error {
+	_, err := conn.Exec(ctx, "INSERT INTO metadata (url, title, description) VALUES ($1, $2, $3)", url, title, description)
+	return err
+}
+
+func saveIndexToDB(ctx context.Context, conn *pgxpool.Pool, index ReverseIndex, url string) error {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Insert words into the words table
+	for word := range index {
+		_, err := tx.Exec(ctx, "INSERT INTO words (word) VALUES ($1) ON CONFLICT DO NOTHING", word)
+		if err != nil {
+			return err
 		}
-		detectedUrl := false
-		for i, urlFrequency := range index[token] {
-			if urlFrequency.url == url {
-				index[token][i].frequency++
-				detectedUrl = true
-				break
+	}
+
+	// Insert index into the reverse index table
+	for word, count := range index {
+		_, err := tx.Exec(ctx, "INSERT INTO reverse_index (word_id, url, count) VALUES ((SELECT id FROM words WHERE word = $1), $2, $3)", word, url, count)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+func extractMetadata(doc *html.Node) (string, string) {
+	var title, description string
+
+	var extract func(*html.Node)
+	extract = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "title" {
+			title = extractText(n)
+		}
+		if n.Type == html.ElementNode && n.Data == "meta" {
+			var name, content string
+			for _, attr := range n.Attr {
+				if attr.Key == "name" {
+					name = attr.Val
+				}
+				if attr.Key == "content" {
+					content = attr.Val
+				}
+			}
+			if name == "description" {
+				description = content
 			}
 		}
-		if !detectedUrl {
-			newUrl := UrlFrequency{url, 1}
-			index[token] = append(index[token], newUrl)
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			extract(c)
 		}
 	}
 
-	// Extract links and crawl them
-	if depth > 0 {
-		links := extractLinks(doc, url)
-		linkCount := 0
-		for _, link := range links {
-			if linkCount >= 50 {
-				break
-			}
-			crawl(link, visited, index, depth-1)
-			linkCount++
-		}
-	}
+	extract(doc)
+	return title, description
 }
 
 func extractText(n *html.Node) string {

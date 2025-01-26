@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: manager
-        image: efrink29/manager:latest
+        image: <INSERT_IMAGE>/manager:latest
         ports:
         - containerPort: 8080
         env:

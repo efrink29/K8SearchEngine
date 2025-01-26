@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: crawler
-        image: efrink29/crawler:latest
+        image: <INSERT_IMAGE>/crawler:latest
         ports:
         - containerPort: 8080
         env:
@@ -40,7 +40,7 @@ spec:
     spec:
       containers:
       - name: crawler
-        image: efrink29/crawler:latest
+        image: <INSERT_IMAGE>/crawler:latest
         ports:
         - containerPort: 8080
         env:
@@ -66,7 +66,7 @@ spec:
     spec:
       containers:
       - name: crawler
-        image: efrink29/crawler:latest
+        image: <INSERT_IMAGE>/crawler:latest
         ports:
         - containerPort: 8080
         env:
