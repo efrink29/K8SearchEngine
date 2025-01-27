@@ -25,7 +25,7 @@ type Link struct {
 
 func main() {
 	// Read environment variables
-	connStrDB := os.Getenv("DB_CONN_STRING")
+	connStrDB := os.Getenv("DB1_CONN")
 	crawlerService := os.Getenv("CRAWLER_SERVICE_HOST")
 	if crawlerService == "" {
 		log.Fatal("CRAWLER_SERVICE_HOST environment variable not set")
@@ -42,6 +42,32 @@ func main() {
 	for i := 0; i < workers; i++ {
 		go processLinks(pool, crawlerService)
 	}
+
+	http.HandleFunc("/startcrawl", func(w http.ResponseWriter, r *http.Request) {
+		// Start Crawling URL, num links
+		if r.Method != http.MethodPost {
+			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var data struct {
+			URL      string `json:"url"`
+			NumLinks int    `json:"num_links"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Forward link to crawler
+		for i := 0; i < data.NumLinks; i++ {
+			enqueueLink(data.URL)
+		}
+
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte("Crawling started"))
+
+	})
 
 	// HTTP handlers
 	http.HandleFunc("/enqueue", func(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +152,16 @@ func forwardLinkToCrawler(crawlerService, link string) error {
 }
 
 func saveLinkToDB(ctx context.Context, pool *pgxpool.Pool, link string) error {
-	_, err := pool.Exec(ctx, "INSERT INTO links (url, created_at) VALUES ($1, NOW())", link)
+	// Check if the link already exists in the database
+	var exists bool
+	err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM links WHERE url=$1)", link).Scan(&exists)
+	if err != nil {
+		return err
+	}
+
+	// If the link does not exist, insert it
+	if !exists {
+		_, err = pool.Exec(ctx, "INSERT INTO links (url) VALUES ($1)", link)
+	}
 	return err
 }

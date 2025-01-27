@@ -19,13 +19,14 @@ type ReverseIndex map[string]int
 
 func main() {
 	// Read environment variables
-	connStrDB := os.Getenv("DB_CONN_STRING")
+	connStrDB := os.Getenv("DB1_CONN")
 	managerService := os.Getenv("MANAGER_SERVICE_HOST")
 	if managerService == "" {
 		log.Fatal("MANAGER_SERVICE_HOST environment variable not set")
 	}
 
 	// Initialize database connection pool
+	log.Printf("Connecting to database %s", connStrDB)
 	pool, err := pgxpool.Connect(context.Background(), connStrDB)
 	if err != nil {
 		log.Fatalf("Error connecting to database: %v", err)
@@ -237,7 +238,7 @@ func extractLinks(doc *html.Node, baseURL string) []string {
 						continue
 					}
 					normalizedLink := strings.TrimSuffix(strings.TrimSpace(parsedLink.String()), "/")
-					if !strings.Contains(normalizedLink, "wikipedia") {
+					if !strings.Contains(normalizedLink, "https://en.wikipedia.org/wiki/") {
 						continue
 					}
 					// Skip if the link is banned, already added, or doesn't match base domains

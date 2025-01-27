@@ -21,7 +21,7 @@ FROM debian:bullseye-slim
 WORKDIR /app
 
 # Copy the binary from the builder
-COPY --from=builder /app/manager .
+COPY --from=builder /app .
 
 # Expose the port
 EXPOSE 8080

@@ -1,22 +1,22 @@
-# Use the official Go image to build the application
+# Use an official Go image as the base for building
 FROM golang:1.20 AS builder
 
 # Set the working directory
 WORKDIR /app
 
-# Copy go.mod and go.sum files
+# Copy Go module files
 COPY go.mod go.sum ./
 
-# Download Go modules
+# Download dependencies
 RUN go mod download
 
-# Copy the entire application code
+# Copy source code
 COPY . .
 
-# Build the Go binary for Linux
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o webcrawler webcrawler.go
+# Build the Go app
+RUN go build -o /app/webcrawler .
 
-# Use a minimal image for running the application
+# Use a minimal base image for the final container
 FROM alpine:latest
 
 # Set the working directory
@@ -28,8 +28,11 @@ COPY --from=builder /app/webcrawler .
 # Add CA certificates for HTTPS
 RUN apk add --no-cache ca-certificates
 
-# Ensure the binary has execution permissions
-RUN chmod +x webcrawler
+# Set the PORT environment variable
+ENV PORT=8080
 
-# Command to run the binary
-ENTRYPOINT ["./webcrawler"]
+# Expose the application's port
+EXPOSE 8080
+
+# Run the application
+CMD ["./webcrawler"]
