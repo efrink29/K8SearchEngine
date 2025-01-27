@@ -1,0 +1,10 @@
+
+db-secrets.yaml
+*.pb.go
+go.mod
+go.sum
+index.txt
+message.proto
+output.txt
+webcrawler
+.DS_Store

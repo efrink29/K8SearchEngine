@@ -11,7 +11,7 @@ This project is a distributed web crawler designed to crawl websites, track the 
 - **Link Discovery**: Finds and manages links from crawled pages to enable recursive crawling.
 - **Centralized Management**: A manager container handles communication with crawlers, manages the links database, and ensures efficient task distribution.
 
-![Architecture Diagram](assets/WebCrawler1.png)
+![Architecture Diagram](Assets/WebCrawler1.png)
 
 ## Architecture Overview
 
